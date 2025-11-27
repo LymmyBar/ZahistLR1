@@ -5,12 +5,14 @@ const bodyParser = require('body-parser');
 const path = require('path');
 const port = 3000;
 const fs = require('fs');
+const jwt = require('jsonwebtoken');
 
 const app = express();
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 
 const SESSION_KEY = 'Authorization';
+const JWT_SECRET = 'very_secret_key_change_me';
 
 class Session {
     #sessions = {}
@@ -60,26 +62,19 @@ const sessions = new Session();
 
 app.use((req, res, next) => {
     let currentSession = {};
-    let sessionId = req.get(SESSION_KEY);
+    const authHeader = req.get(SESSION_KEY);
 
-    if (sessionId) {
-        currentSession = sessions.get(sessionId);
-        if (!currentSession) {
-            currentSession = {};
-            sessionId = sessions.init(res);
+    if (authHeader) {
+        const token = authHeader.replace('Bearer ', '');
+        try {
+            const payload = jwt.verify(token, JWT_SECRET);
+            req.session = payload;
+        } catch (e) {
+            req.session = {};
         }
     } else {
-        sessionId = sessions.init(res);
+        req.session = {};
     }
-
-    req.session = currentSession;
-    req.sessionId = sessionId;
-
-    onFinished(req, () => {
-        const currentSession = req.session;
-        const sessionId = req.sessionId;
-        sessions.set(sessionId, currentSession);
-    });
 
     next();
 });
@@ -123,13 +118,17 @@ app.post('/api/login', (req, res) => {
     });
 
     if (user) {
-        req.session.username = user.username;
-        req.session.login = user.login;
+        const payload = {
+            username: user.username,
+            login: user.login
+        };
 
-        res.json({ token: req.sessionId });
+        const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '1h' });
+
+        return res.json({ token, username: user.username });
     }
 
-    res.status(401).send();
+    return res.status(401).send();
 });
 
 app.listen(port, () => {
